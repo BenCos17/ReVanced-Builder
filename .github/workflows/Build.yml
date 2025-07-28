@@ -9,14 +9,13 @@ on:
 jobs:
   patch:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v3
 
       - name: AngleSharp
         run: |
           New-Item -Path ReVanced_Builder -ItemType Directory -Force
-
           $Parameters = @{
               Uri             = "https://www.nuget.org/api/v2/package/AngleSharp"
               OutFile         = "anglesharp.nupkg"
@@ -24,9 +23,7 @@ jobs:
               Verbose         = $true
           }
           Invoke-Webrequest @Parameters
-
           Add-Type -Assembly System.IO.Compression.FileSystem
-
           $ZIP = [IO.Compression.ZipFile]::OpenRead("anglesharp.nupkg")
           $ZIP.Entries | Where-Object { $_.FullName -in @("lib/net8.0/AngleSharp.xml", "lib/net8.0/AngleSharp.dll") } | ForEach-Object {
               [IO.Compression.ZipFileExtensions]::ExtractToFile($_, $_.Name, $true)
@@ -48,7 +45,7 @@ jobs:
       - name: Zulu JDK
         run: . Scripts\Zulu_JDK.ps1
 
-      # --- New step: restore keystore from base64 secret ---
+      # Restore keystore from base64 secret
       - name: Restore Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -66,20 +63,31 @@ jobs:
           --purge `
           --out "ReVanced_Builder\revanced.apk"
 
-      # --- New step: Sign APK ---
-      - name: Sign APK
+      # Setup Android SDK build tools for apksigner
+      - name: Setup Android SDK Build Tools
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 33
+          build-tools-version: 33.0.2
+
+      # Sign APK with apksigner (v2/v3 signature)
+      - name: Sign APK with apksigner
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          $jarsigner = "$env:ProgramFiles\Zulu\zulu*\bin\jarsigner.exe"
-          & $jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 `
-            -keystore my-release-key.jks `
-            -storepass $env:KEYSTORE_PASSWORD `
-            -keypass $env:KEY_PASSWORD `
-            "ReVanced_Builder\revanced.apk" `
-            $env:KEY_ALIAS
+          apksigner sign --ks my-release-key.jks `
+            --ks-key-alias $env:KEY_ALIAS `
+            --ks-pass pass:$env:KEYSTORE_PASSWORD `
+            --key-pass pass:$env:KEY_PASSWORD `
+            --out ReVanced_Builder/revanced-signed.apk `
+            ReVanced_Builder/revanced.apk
+
+      - name: Replace unsigned APK with signed APK
+        run: |
+          Remove-Item ReVanced_Builder\revanced.apk
+          Rename-Item ReVanced_Builder\revanced-signed.apk ReVanced_Builder\revanced.apk
 
       - name: Creating archive
         run: |
