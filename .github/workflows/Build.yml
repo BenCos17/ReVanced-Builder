@@ -9,15 +9,14 @@ on:
 jobs:
   patch:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v3
 
       - name: AngleSharp
         run: |
           New-Item -Path ReVanced_Builder -ItemType Directory -Force
 
-          # https://www.nuget.org/packages/AngleSharp/
           $Parameters = @{
               Uri             = "https://www.nuget.org/api/v2/package/AngleSharp"
               OutFile         = "anglesharp.nupkg"
@@ -28,43 +27,59 @@ jobs:
 
           Add-Type -Assembly System.IO.Compression.FileSystem
 
-          Add-Type -Assembly System.IO.Compression.FileSystem
           $ZIP = [IO.Compression.ZipFile]::OpenRead("anglesharp.nupkg")
-          $ZIP.Entries| Where-Object -FilterScript {($_.FullName -eq "lib/net8.0/AngleSharp.xml") -or ($_.FullName -eq "lib/net8.0/AngleSharp.dll")} | ForEach-Object -Process {
-              [IO.Compression.ZipFileExtensions]::ExtractToFile($_, "$($_.Name)", $true)
+          $ZIP.Entries | Where-Object { $_.FullName -in @("lib/net8.0/AngleSharp.xml", "lib/net8.0/AngleSharp.dll") } | ForEach-Object {
+              [IO.Compression.ZipFileExtensions]::ExtractToFile($_, $_.Name, $true)
           }
           $ZIP.Dispose()
 
       - name: YouTube
-        run: |
-          . Scripts\YouTube.ps1
+        run: . Scripts\YouTube.ps1
 
       - name: ReVanced CLI
-        run: |
-          . Scripts\ReVanced_CLI.ps1
+        run: . Scripts\ReVanced_CLI.ps1
 
       - name: Downloading ReVanced Patches
-        run: |
-          . Scripts\ReVanced_Patches.ps1
+        run: . Scripts\ReVanced_Patches.ps1
 
       - name: Vanced MicroG
-        run: |
-          . Scripts\MicroG.ps1
+        run: . Scripts\MicroG.ps1
 
       - name: Zulu JDK
+        run: . Scripts\Zulu_JDK.ps1
+
+      # --- New step: restore keystore from base64 secret ---
+      - name: Restore Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          . Scripts\Zulu_JDK.ps1
+          $decoded = [System.Convert]::FromBase64String($env:KEYSTORE_BASE64)
+          [IO.File]::WriteAllBytes("my-release-key.jks", $decoded)
+          dir my-release-key.jks
 
       - name: Building
         run: |
-          # https://revanced.app/patches?pkg=com.google.android.youtube
-          # https://github.com/ReVanced/revanced-cli/tree/main/docs
           & "$env:ProgramFiles\Zulu\zulu*\bin\java.exe" `
           -jar "ReVanced_Builder\revanced-cli.jar" `
           patch "ReVanced_Builder\youtube.apk" `
           --patches "ReVanced_Builder\revanced-patches.rvp" `
           --purge `
           --out "ReVanced_Builder\revanced.apk"
+
+      # --- New step: Sign APK ---
+      - name: Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          $jarsigner = "$env:ProgramFiles\Zulu\zulu*\bin\jarsigner.exe"
+          & $jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 `
+            -keystore my-release-key.jks `
+            -storepass $env:KEYSTORE_PASSWORD `
+            -keypass $env:KEY_PASSWORD `
+            "ReVanced_Builder\revanced.apk" `
+            $env:KEY_ALIAS
 
       - name: Creating archive
         run: |
@@ -79,10 +94,8 @@ jobs:
       - name: ReleaseNotesTemplate
         id: read_release
         run: |
-          # https://en.wikipedia.org/wiki/Percent-encoding
           (Get-Content -Path ReleaseNotesTemplate.md -Encoding utf8 -Raw).replace("YouTubeTag", "${{ env.LatestSupportedYT }}").replace("CLITag", "${{ env.CLIvtag }}").replace("PatchesTag", "${{ env.Patchesvtag }}").replace("MicroGTag", "${{ env.MicroGTag }}").replace("ZuluTag", "${{ env.ZuluTag }}") | Set-Content -Path ReleaseNotesTemplate.md -Encoding utf8 -Force
 
-          # https://trstringer.com/github-actions-multiline-strings/
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ReleaseBody=ReleaseNotesTemplate.md"
 
           $ReleaseName = Get-Date -f "yyyy.MM.dd"
