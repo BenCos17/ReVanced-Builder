@@ -29,7 +29,7 @@ jobs:
               [IO.Compression.ZipFileExtensions]::ExtractToFile($_, $_.Name, $true)
           }
           $ZIP.Dispose()
-
+          
       - name: YouTube
         run: . Scripts\YouTube.ps1
 
@@ -70,14 +70,13 @@ jobs:
           api-level: 33
           build-tools-version: 33.0.2
 
-      # Add build-tools to PATH to find apksigner.exe
+      # Add build-tools to PATH persistently for next steps
       - name: Add build-tools to PATH
         shell: pwsh
         run: |
           $buildToolsPath = "${{ env.ANDROID_SDK_ROOT }}\build-tools\33.0.2"
           Write-Host "Adding $buildToolsPath to PATH"
-          $env:PATH = "$buildToolsPath;$env:PATH"
-          Write-Host "PATH is now $env:PATH"
+          echo "$buildToolsPath" >> $env:GITHUB_PATH
 
       # Optional: verify apksigner is available
       - name: Verify apksigner
@@ -116,9 +115,7 @@ jobs:
         id: read_release
         run: |
           (Get-Content -Path ReleaseNotesTemplate.md -Encoding utf8 -Raw).replace("YouTubeTag", "${{ env.LatestSupportedYT }}").replace("CLITag", "${{ env.CLIvtag }}").replace("PatchesTag", "${{ env.Patchesvtag }}").replace("MicroGTag", "${{ env.MicroGTag }}").replace("ZuluTag", "${{ env.ZuluTag }}") | Set-Content -Path ReleaseNotesTemplate.md -Encoding utf8 -Force
-
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ReleaseBody=ReleaseNotesTemplate.md"
-
           $ReleaseName = Get-Date -f "yyyy.MM.dd"
           echo "RELEASE_NAME=$ReleaseName" >> $env:GITHUB_ENV
 
