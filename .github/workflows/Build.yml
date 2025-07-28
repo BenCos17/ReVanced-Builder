@@ -70,6 +70,19 @@ jobs:
           api-level: 33
           build-tools-version: 33.0.2
 
+      # Add build-tools to PATH to find apksigner.exe
+      - name: Add build-tools to PATH
+        shell: pwsh
+        run: |
+          $buildToolsPath = "${{ env.ANDROID_SDK_ROOT }}\build-tools\33.0.2"
+          Write-Host "Adding $buildToolsPath to PATH"
+          $env:PATH = "$buildToolsPath;$env:PATH"
+          Write-Host "PATH is now $env:PATH"
+
+      # Optional: verify apksigner is available
+      - name: Verify apksigner
+        run: apksigner --version
+
       # Sign APK with apksigner (v2/v3 signature)
       - name: Sign APK with apksigner
         env:
